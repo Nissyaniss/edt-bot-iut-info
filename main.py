@@ -1,6 +1,6 @@
 import os
+from asyncio import sleep
 from datetime import datetime
-from time import sleep
 
 import discord
 import fitz
@@ -126,7 +126,7 @@ async def start(ctx, ignore_up_to: int = -1):
         await edt("A1", ignore_up_to)
         await edt("A2", ignore_up_to)
         await edt("A3", ignore_up_to)
-        sleep(60)
+        await sleep(60)
 
 
 bot.run(os.getenv("TOKEN"))
