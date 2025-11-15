@@ -80,6 +80,7 @@ async def edt(class_name, ignore_up_to=0):
         last_modified = None
 
     latest_edt = LatestEdt(filename, last_modified)
+    is_modification = False
 
     if (
         (class_name == "A1" and latest_edt.last_modified > a1_latest_edt.last_modified)
@@ -87,10 +88,16 @@ async def edt(class_name, ignore_up_to=0):
         or (class_name == "A3" and latest_edt.last_modified > a3_latest_edt.last_modified)
     ) and (ignore_up_to < latest_edt.week_number or ignore_up_to < 0):
         if class_name == "A1":
+            if latest_edt.week_number == a1_latest_edt.week_number:
+                is_modification = True
             a1_latest_edt = latest_edt
         elif class_name == "A2":
+            if latest_edt.week_number == a2_latest_edt.week_number:
+                is_modification = True
             a2_latest_edt = latest_edt
         elif class_name == "A3":
+            if latest_edt.week_number == a3_latest_edt.week_number:
+                is_modification = True
             a3_latest_edt = latest_edt
 
         edt_link = "{base}{className}/{filename}?downloadformat=pdf".format(
@@ -116,8 +123,12 @@ async def edt(class_name, ignore_up_to=0):
 
         doc.close()
 
-        await channel.send(content="<@&{role}> **[S{number}]({link})**".format(number=latest_edt.week_number, role=role, link=edt_link), file=discord.File(
-            "./{className}.png".format(className=class_name)))
+        if is_modification:
+            await channel.send(content="<@&{role}> **Modification du [S{number}]({link})**".format(number=latest_edt.week_number, role=role, link=edt_link), file=discord.File(
+                "./{className}.png".format(className=class_name)))
+        else:
+            await channel.send(content="<@&{role}> **[S{number}]({link})**".format(number=latest_edt.week_number, role=role, link=edt_link), file=discord.File(
+                "./{className}.png".format(className=class_name)))
 
         os.remove("edt.pdf")
         os.remove("{className}.png".format(className=class_name))
@@ -135,7 +146,8 @@ async def start(ctx, ignore_up_to: int = -1):
         await edt("A1", ignore_up_to)
         await edt("A2", ignore_up_to)
         await edt("A3", ignore_up_to)
-        await sleep(5)
+# a3_latest_edt.last_modified = a3_latest_edt.last_modified.replace(year=1) # Simulating Modification
+        await sleep(60)
 
 
 bot.run(os.getenv("TOKEN"))
