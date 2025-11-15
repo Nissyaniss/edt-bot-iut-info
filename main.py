@@ -10,9 +10,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-a1_last_time_checked = datetime(1, 1, 1)
-a2_last_time_checked = datetime(1, 1, 1)
-a3_last_time_checked = datetime(1, 1, 1)
+
+class LatestEdt:
+
+    def __init__(self, filename="", last_modified=datetime(1, 1, 1)):
+        self.filename = filename
+        self.last_modified = last_modified
+        if filename == "":
+            self.week_number = 0
+        else:
+            self.week_number = int(str(filename).split("_")[
+                                   1][1:].split(".")[0])
+
+
+a1_latest_edt = LatestEdt()
+a2_latest_edt = LatestEdt()
+a3_latest_edt = LatestEdt()
 
 
 async def edt(class_name, ignore_up_to=0):
@@ -20,15 +33,15 @@ async def edt(class_name, ignore_up_to=0):
     role = ""
     match class_name:
         case "A1":
-            global a1_last_time_checked
+            global a1_latest_edt
             channel = bot.get_channel(int(os.getenv("CHANNEL_A1")))
             role = str(os.getenv("ROLE_A1"))
         case "A2":
-            global a2_last_time_checked
+            global a2_latest_edt
             channel = bot.get_channel(int(os.getenv("CHANNEL_A2")))
             role = str(os.getenv("ROLE_A2"))
         case "A3":
-            global a3_last_time_checked
+            global a3_latest_edt
             channel = bot.get_channel(int(os.getenv("CHANNEL_A3")))
             role = str(os.getenv("ROLE_A3"))
 
@@ -66,26 +79,22 @@ async def edt(class_name, ignore_up_to=0):
     except ValueError:
         last_modified = None
 
-    latest_edt = {
-        "filename": filename,
-        "last_modified": last_modified,
-        "week_number": int(str(filename).split("_")[1][1:].split(".")[0]),
-    }
+    latest_edt = LatestEdt(filename, last_modified)
 
     if (
-        latest_edt["last_modified"] > a1_last_time_checked
-        or latest_edt["last_modified"] > a2_last_time_checked
-        or latest_edt["last_modified"] > a3_last_time_checked
-    ) and (ignore_up_to < latest_edt["week_number"] or ignore_up_to < 0):
+        (class_name == "A1" and latest_edt.last_modified > a1_latest_edt.last_modified)
+        or (class_name == "A2" and latest_edt.last_modified > a2_latest_edt.last_modified)
+        or (class_name == "A3" and latest_edt.last_modified > a3_latest_edt.last_modified)
+    ) and (ignore_up_to < latest_edt.week_number or ignore_up_to < 0):
         if class_name == "A1":
-            a1_last_time_checked = latest_edt["last_modified"]
+            a1_latest_edt = latest_edt
         elif class_name == "A2":
-            a2_last_time_checked = latest_edt["last_modified"]
+            a2_latest_edt = latest_edt
         elif class_name == "A3":
-            a3_last_time_checked = latest_edt["last_modified"]
+            a3_latest_edt = latest_edt
 
         edt_link = "{base}{className}/{filename}?downloadformat=pdf".format(
-            base=base_url, className=class_name, filename=latest_edt["filename"]
+            base=base_url, className=class_name, filename=latest_edt.filename
         )
 
         response = requests.get(
@@ -107,7 +116,7 @@ async def edt(class_name, ignore_up_to=0):
 
         doc.close()
 
-        await channel.send(content="<@&{role}> **[S{number}]({link})**".format(number=latest_edt['week_number'], role=role, link=edt_link), file=discord.File(
+        await channel.send(content="<@&{role}> **[S{number}]({link})**".format(number=latest_edt.week_number, role=role, link=edt_link), file=discord.File(
             "./{className}.png".format(className=class_name)))
 
         os.remove("edt.pdf")
@@ -126,7 +135,7 @@ async def start(ctx, ignore_up_to: int = -1):
         await edt("A1", ignore_up_to)
         await edt("A2", ignore_up_to)
         await edt("A3", ignore_up_to)
-        await sleep(60)
+        await sleep(5)
 
 
 bot.run(os.getenv("TOKEN"))
