@@ -52,8 +52,12 @@ async def edt(class_name, ignore_up_to=0):
         className=class_name
     )
 
-    response = requests.get(class_url)
-    response.raise_for_status()
+    try:
+        response = requests.get(class_url, timeout=10)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"[{class_name}] Failed to reach server: {e}")
+        return
 
     soup = BeautifulSoup(response.text, "html.parser")
 
@@ -104,12 +108,17 @@ async def edt(class_name, ignore_up_to=0):
             base=base_url, className=class_name, filename=latest_edt.filename
         )
 
-        response = requests.get(
-            "{edt_link}?downloadformat=pdf".format(
-                edt_link=edt_link
+        try:
+            response = requests.get(
+                "{edt_link}?downloadformat=pdf".format(
+                    edt_link=edt_link
+                ),
+                timeout=10
             )
-        )
-        response.raise_for_status()
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            print(f"[{class_name}] Failed to download PDF: {e}")
+            return
 
         with open("edt.pdf", mode="wb") as file:
             file.write(response.content)
