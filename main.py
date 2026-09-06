@@ -23,34 +23,44 @@ class LatestEdt:
                                    1][1:].split(".")[0])
 
 
-a1_latest_edt = LatestEdt()
-a2_latest_edt = LatestEdt()
-a3_latest_edt = LatestEdt()
+latest_edt_by_class = {
+    "A1": LatestEdt(),
+    "A2": LatestEdt(),
+    "A3": LatestEdt(),
+}
 
 
-async def edt(class_name, ignore_up_to=0):
-    channel = ""
-    role = ""
-    match class_name:
-        case "A1":
-            global a1_latest_edt
-            channel = bot.get_channel(int(os.getenv("CHANNEL_A1")))
-            role = str(os.getenv("ROLE_A1"))
-        case "A2":
-            global a2_latest_edt
-            channel = bot.get_channel(int(os.getenv("CHANNEL_A2")))
-            role = str(os.getenv("ROLE_A2"))
-        case "A3":
-            global a3_latest_edt
-            channel = bot.get_channel(int(os.getenv("CHANNEL_A3")))
-            role = str(os.getenv("ROLE_A3"))
+def find_file_rows(table):
+    """Return every row in the directory listing that points to an actual
+    file, skipping folders (href ending in '/'), the 'Parent Directory'
+    row, the header row, and any malformed/empty rows."""
+    rows = table.find_all("tr")
+    file_rows = []
 
+    for row in rows:
+        cols = row.find_all("td")
+        if len(cols) < 5:
+            continue
+
+        link = cols[1].find("a")
+        if link is None:
+            continue
+
+        href = link.get("href", "")
+        if not href or href.endswith("/"):
+            continue
+
+        file_rows.append(row)
+
+    return file_rows
+
+
+async def edt(class_name, ignore_up_to=-1):
+    channel = bot.get_channel(int(os.getenv(f"CHANNEL_{class_name}")))
+    role = str(os.getenv(f"ROLE_{class_name}"))
     base_url = os.getenv("BASE_URL")
 
-    class_url = "{base}{className}".format(
-        base=base_url,
-        className=class_name
-    )
+    class_url = f"{base_url}{class_name}"
 
     try:
         response = requests.get(class_url, timeout=10)
@@ -60,65 +70,60 @@ async def edt(class_name, ignore_up_to=0):
         return
 
     soup = BeautifulSoup(response.text, "html.parser")
-
     table = soup.find("table")
 
-    rows = table.find_all("tr")
-    last_row = rows[len(rows) - 2]  # There is a empty row + len diff
+    file_rows = find_file_rows(table)
+    if not file_rows:
+        print(f"[{class_name}] No file row found (only folders or empty listing?).")
+        return
 
-    cols = last_row.find_all("td")
     # cols
     # 0 icon
     # 1 name
     # 2 last modified
     # 3 size
     # 4 description
-
-    filename = cols[1].find("a").get("href")
-
-    date_str = cols[2].get_text(strip=True)
-
-    try:
-        last_modified = datetime.strptime(date_str, "%Y-%m-%d %H:%M")
-    except ValueError:
-        last_modified = None
-
-    latest_edt = LatestEdt(filename, last_modified)
-    is_modification = False
-
-    if (
-        (class_name == "A1" and latest_edt.last_modified > a1_latest_edt.last_modified)
-        or (class_name == "A2" and latest_edt.last_modified > a2_latest_edt.last_modified)
-        or (class_name == "A3" and latest_edt.last_modified > a3_latest_edt.last_modified)
-    ) and (ignore_up_to < latest_edt.week_number or ignore_up_to < 0):
-        if class_name == "A1":
-            if latest_edt.week_number == a1_latest_edt.week_number:
-                is_modification = True
-            a1_latest_edt = latest_edt
-        elif class_name == "A2":
-            if latest_edt.week_number == a2_latest_edt.week_number:
-                is_modification = True
-            a2_latest_edt = latest_edt
-        elif class_name == "A3":
-            if latest_edt.week_number == a3_latest_edt.week_number:
-                is_modification = True
-            a3_latest_edt = latest_edt
-
-        edt_link = "{base}{className}/{filename}?downloadformat=pdf".format(
-            base=base_url, className=class_name, filename=latest_edt.filename
-        )
+    entries = []
+    for row in file_rows:
+        cols = row.find_all("td")
+        filename = cols[1].find("a").get("href")
+        date_str = cols[2].get_text(strip=True)
 
         try:
-            response = requests.get(
-                "{edt_link}?downloadformat=pdf".format(
-                    edt_link=edt_link
-                ),
-                timeout=10
-            )
+            last_modified = datetime.strptime(date_str, "%Y-%m-%d %H:%M")
+        except ValueError:
+            last_modified = None
+
+        entries.append(LatestEdt(filename, last_modified))
+
+    entries.sort(key=lambda e: e.week_number)
+
+    current_latest = latest_edt_by_class[class_name]
+
+    for entry in entries:
+        if entry.last_modified is None:
+            continue
+
+        if entry.week_number <= ignore_up_to:
+            continue
+
+        is_new_week = entry.week_number > current_latest.week_number
+        is_modification = (
+            entry.week_number == current_latest.week_number
+            and entry.last_modified > current_latest.last_modified
+        )
+
+        if not (is_new_week or is_modification):
+            continue
+
+        edt_link = f"{base_url}{class_name}/{entry.filename}?downloadformat=pdf"
+
+        try:
+            response = requests.get(edt_link, timeout=10)
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            print(f"[{class_name}] Failed to download PDF: {e}")
-            return
+            print(f"[{class_name}] Failed to download PDF for week {entry.week_number}: {e}")
+            continue
 
         with open("edt.pdf", mode="wb") as file:
             file.write(response.content)
@@ -128,19 +133,25 @@ async def edt(class_name, ignore_up_to=0):
             zoom = 2.0
             mat = fitz.Matrix(zoom, zoom)
             pix = page.get_pixmap(matrix=mat)
-            pix.save("{className}.png".format(className=class_name))
-
+            pix.save(f"{class_name}.png")
         doc.close()
 
         if is_modification:
-            await channel.send(content="<@&{role}> **Modification du [S{number}]({link})**".format(number=latest_edt.week_number, role=role, link=edt_link), file=discord.File(
-                "./{className}.png".format(className=class_name)))
+            await channel.send(
+                content=f"<@&{role}> **Modification du [S{entry.week_number}]({edt_link})**",
+                file=discord.File(f"./{class_name}.png"),
+            )
         else:
-            await channel.send(content="<@&{role}> **[S{number}]({link})**".format(number=latest_edt.week_number, role=role, link=edt_link), file=discord.File(
-                "./{className}.png".format(className=class_name)))
+            await channel.send(
+                content=f"<@&{role}> **[S{entry.week_number}]({edt_link})**",
+                file=discord.File(f"./{class_name}.png"),
+            )
 
         os.remove("edt.pdf")
-        os.remove("{className}.png".format(className=class_name))
+        os.remove(f"{class_name}.png")
+
+        current_latest = entry
+        latest_edt_by_class[class_name] = current_latest
 
 
 bot = discord.Bot()
@@ -155,7 +166,6 @@ async def start(ctx, ignore_up_to: int = -1):
         await edt("A1", ignore_up_to)
         await edt("A2", ignore_up_to)
         await edt("A3", ignore_up_to)
-# a3_latest_edt.last_modified = a3_latest_edt.last_modified.replace(year=1) # Simulating Modification
         await sleep(60)
 
 
